@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>APOCALYPSE ARENA — PvPVE (PeerJS)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+<style>
+  html, body { margin:0; padding:0; background:#090b10; color:#eee; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #game { display:none; width:100vw; height:100vh; background:#0b0b0b; touch-action:none; }
+  /* Lobby */
+  #lobby{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse at 50% 0%, #0d1f40 0%, #050814 70%);
+    z-index:100;
+  }
+  .panel{
+    width:min(520px,92vw); border:1px solid rgba(120,170,255,.25); border-radius:14px;
+    background: rgba(10,18,35,.92); padding:18px 18px 14px;
+    box-shadow:0 10px 40px rgba(0,0,0,.45);
+  }
+  .title{font-weight:900; letter-spacing:.12em; font-size:22px; margin:2px 0 10px;}
+  .sub{opacity:.75; font-size:13px; line-height:1.45; margin-bottom:14px}
+  .row{display:flex; gap:10px; align-items:center;}
+  .col{flex:1;}
+  input{
+    width:100%; padding:11px 12px; border-radius:10px;
+    border:1px solid rgba(120,170,255,.25); background:#071225; color:#fff; outline:none;
+  }
+  input:focus{border-color:rgba(0,170,255,.65)}
+  button{
+    width:100%; padding:11px 12px; border-radius:10px; border:0; cursor:pointer;
+    font-weight:800; letter-spacing:.05em;
+  }
+  .btnA{background:linear-gradient(135deg,#0050aa,#00a2ff); color:#fff;}
+  .btnB{background:linear-gradient(135deg,#2b0b1b,#b01255); color:#fff;}
+  .btnC{background:linear-gradient(135deg,#003322,#00a66a); color:#d7ffe9;}
+  .mini{font-size:12px; opacity:.8; margin-top:8px}
+  .roomBox{
+    margin-top:10px; padding:10px 12px; border-radius:10px;
+    border:1px dashed rgba(0,255,136,.5); color:#00ff88; background:#061a12;
+    word-break:break-all; text-align:center; display:none;
+  }
+  #status{margin-top:10px; font-size:13px; opacity:.85; min-height:18px}
+  /* In-game HUD */
+  .hud {
+    position:fixed; left:12px; top:12px; z-index:10; pointer-events:none;
+    text-shadow:0 1px 0 rgba(0,0,0,.6);
+  }
+  .hud .bar { height:10px; width:260px; background:#333; border-radius:6px; overflow:hidden; margin:6px 0;}
+  .hud .bar > div { height:100%; background:#4caf50; width:100%; }
+  .chip { background:#151923; border:1px solid rgba(120,170,255,.2); border-radius:999px; padding:4px 10px; font-size:12px; }
+  .buffs { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; max-width:360px;}
+  .buff { font-size:11px; background:#101421; border:1px solid rgba(120,170,255,.18); padding:3px 6px; border-radius:6px;}
+  .corner {
+    position:fixed; right:12px; top:12px; z-index:10; pointer-events:none; text-align:right;
+  }
+  .legend { font-size:12px; opacity:.9; }
+
+  /* Mobile controls */
+  #joyL, #fireBtn, #pvpBtn {
+    position:fixed; bottom:16px; z-index:20; user-select:none;
+  }
+  #joyL { left:16px; width:140px; height:140px; border-radius:50%; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.15); touch-action:none; }
+  #joyThumb {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:64px; height:64px; border-radius:50%; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.2);
+  }
+  #fireBtn { right:16px; width:90px; height:90px; border-radius:50%;
+    background:rgba(255,80,80,.2); border:1px solid rgba(255,80,80,.35); display:flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:900; letter-spacing:.05em; }
+  #pvpBtn{
+    right:116px; width:90px; height:90px; border-radius:50%;
+    background:rgba(0,170,255,.18); border:1px solid rgba(0,170,255,.35); display:flex; align-items:center; justify-content:center;
+    color:#cfefff; font-weight:900; letter-spacing:.05em;
+  }
+  @media (hover:hover) and (pointer:fine) {
+    #joyL, #fireBtn, #pvpBtn { display:none; } /* desktop hide */
+  }
+
+  /* Top center room info */
+  #topInfo{
+    position:fixed; top:12px; left:50%; transform:translateX(-50%);
+    z-index:15; pointer-events:none; display:none; gap:10px; align-items:center;
+  }
+  #topInfo .pill{
+    pointer-events:none;
+    background:rgba(8,12,34,.72);
+    border:1px solid rgba(120,170,255,.18);
+    border-radius:999px; padding:6px 12px;
+    font-size:12px;
+  }
+
+  /* Small player list */
+  #pList{
+    position:fixed; left:12px; bottom:12px; z-index:15; pointer-events:none;
+    display:none;
+  }
+  #pList .pl{
+    background:rgba(8,12,34,.72);
+    border:1px solid rgba(120,170,255,.18);
+    border-radius:10px;
+    padding:8px 10px;
+    margin-top:6px;
+    width:260px;
+    font-size:12px;
+  }
+  #pList .pl strong{font-weight:900}
+
+  #deathMsg{
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    z-index:200; pointer-events:none;
+    background: radial-gradient(circle at 50% 35%, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.65) 65%, rgba(0,0,0,0.78) 100%);
+    font-weight:1000; letter-spacing:.08em; text-align:center;
+    font-size:34px; color:#ff4b81;
+    text-shadow:0 8px 40px rgba(0,0,0,.8);
+  }
+  #deathMsg span{ display:block; font-size:14px; color:#fff; opacity:.85; margin-top:10px; font-weight:800; letter-spacing:.02em;}
+
+</style>
+</head>
+<body>
+
+<div id="lobby">
+  <div class="panel">
+    <div class="title">APOCALYPSE ARENA</div>
+    <div class="sub">
+      오픈월드 PvE(좀비/아이템/차량) + PeerJS PvP(플레이어 전투) 통합 프로토타입.<br/>
+      <b>권장:</b> 2~4명. (호스트=방 만든 사람)
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <button class="btnA" id="btnCreate">🏟️ 방 만들기 (Host)</button>
+        <div class="roomBox" id="roomBox"></div>
+        <button class="btnC" id="btnCopy" style="display:none">📋 방 ID 복사</button>
+      </div>
+      <div class="col">
+        <input id="joinId" placeholder="상대 방 ID 입력..." />
+        <button class="btnB" id="btnJoin">🎮 입장하기</button>
+      </div>
+    </div>
+
+    <div class="mini">
+      PC: WASD/방향키 이동 · 마우스 조준/클릭 사격 · R 재장전 · E 탑승/하차 · (PvP 푸시) P<br/>
+      Mobile: 좌 조이스틱 이동 · 우 FIRE 사격 · PvP(밀치기) 버튼
+    </div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="topInfo">
+  <div class="pill" id="roomPill">ROOM —</div>
+  <div class="pill" id="netPill">NET: —</div>
+</div>
+
+<div class="hud" id="hud" style="display:none">
+  <div class="row" style="gap:12px; align-items:center;">
+    <div style="font-weight:900">HP</div>
+    <div class="bar"><div id="hpBar"></div></div>
+    <div class="chip" id="ammoChip">AMMO 0</div>
+    <div class="chip" id="carChip" style="display:none;">🚗 DRIVING</div>
+    <div class="chip" id="pvpChip">PvP ON</div>
+  </div>
+  <div class="buffs" id="buffs"></div>
+  <div class="row" style="margin-top:6px; gap:10px;">
+    <div class="chip" id="invChip">INVENTORY 0</div>
+    <div class="chip" id="scoreChip">KILLS 0</div>
+    <div class="chip" id="waveChip">WAVE 1</div>
+  </div>
+</div>
+
+<div class="corner legend" id="legend" style="display:none">
+  <div>PC: WASD/방향키 이동 · 마우스 조준/클릭 사격 · R: 재장전 · E: 탑승/하차 · P: PvP 밀치기</div>
+  <div>모바일: 왼쪽 조이스틱 이동 · FIRE 사격 · PvP 버튼(근접 밀치기)</div>
+</div>
+
+<!-- Mobile -->
+<div id="joyL" style="display:none"><div id="joyThumb"></div></div>
+<div id="pvpBtn" style="display:none">PVP</div>
+<div id="fireBtn" style="display:none">FIRE</div>
+
+<div id="pList"></div>
+
+<script>
+(() => {
+  // ========= PEER / LOBBY =========
+  const statusEl = document.getElementById('status');
+  const roomBox = document.getElementById('roomBox');
+  const btnCopy = document.getElementById('btnCopy');
+  const joinIdEl = document.getElementById('joinId');
+
+  let peer = null;
+  let isHost = false;
+  let myId = '';
+  let roomId = '';
+  let conns = new Map(); // peerId -> DataConnection
+  let netReady = false;
+
+  function setStatus(msg){ statusEl.textContent = msg; }
+
+  function createPeer(){
+    return new Peer(undefined, {debug: 1});
+  }
+
+  function broadcast(msg){
+    for (const c of conns.values()){
+      try{ c.send(msg); }catch(e){}
+    }
+  }
+
+  document.getElementById('btnCreate').onclick = () => {
+    if(peer) return;
+    isHost = true;
+    peer = createPeer();
+    setStatus('⏳ Peer 생성 중...');
+    peer.on('open', id => {
+      myId = id; roomId = id;
+      roomBox.style.display = 'block';
+      roomBox.textContent = roomId;
+      btnCopy.style.display = 'block';
+      setStatus('✅ 방 생성 완료. 상대가 입장하면 자동 시작!');
+      document.getElementById('roomPill').textContent = 'ROOM ' + roomId;
+    });
+    peer.on('connection', c => {
+      setupConn(c);
+      setStatus('✅ 연결됨: ' + c.peer);
+      tryStart();
+    });
+    peer.on('error', e => setStatus('오류: ' + (e.type||e)));
+  };
+
+  document.getElementById('btnJoin').onclick = () => {
+    if(peer) return;
+    const rid = joinIdEl.value.trim();
+    if(!rid){ setStatus('방 ID를 입력해줘.'); return; }
+    isHost = false;
+    peer = createPeer();
+    setStatus('⏳ Peer 생성 중...');
+    peer.on('open', id => {
+      myId = id;
+      roomId = rid;
+      document.getElementById('roomPill').textContent = 'ROOM ' + roomId;
+      setStatus('🔗 연결 시도 중...');
+      const c = peer.connect(rid, {reliable:true});
+      setupConn(c);
+    });
+    peer.on('error', e => setStatus('연결 실패: ' + (e.type||e)));
+  };
+
+  btnCopy.onclick = async () => {
+    try{
+      await navigator.clipboard.writeText(roomId);
+      btnCopy.textContent = '✅ 복사됨';
+      setTimeout(()=>btnCopy.textContent='📋 방 ID 복사', 1200);
+    }catch(e){
+      setStatus('클립보드 복사 실패 (브라우저 권한 확인)');
+    }
+  };
+
+  function setupConn(c){
+    conns.set(c.peer, c);
+    c.on('open', () => {
+      setStatus('✅ 연결됨. 동기화 중...');
+      // handshake
+      c.send({t:'hello', from: myId, host: isHost});
+      if(isHost){
+        // send seed/world snapshot after game init (once started)
+      }
+      tryStart();
+    });
+    c.on('data', onNet);
+    c.on('close', () => {
+      conns.delete(c.peer);
+      delete remotePlayers[c.peer];
+      refreshPlayerList();
+      setNetPill();
+    });
+    c.on('error', () => {});
+  }
+
+  // ========= GAME CORE (based on zm.html vibe) =========
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  function resize() {
+    canvas.width = Math.floor(window.innerWidth * DPR);
+    canvas.height = Math.floor(window.innerHeight * DPR);
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize, {passive:true});
+  resize();
+
+  // World
+  const WORLD_SIZE = 8000;
+  const BUILDING_COUNT = 220;
+  const ZOMBIE_BASE = 18; // lowered for playability
+  const CAR_COUNT = 12;
+  const ITEM_SCATTER = 220;
+  const EFFECT_SCATTER = 220;
+
+  // Deterministic RNG for consistent world (seed comes from host)
+  function mulberry32(a){return function(){var t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}}
+  let WORLD_SEED = 1337;
+  let RNG = mulberry32(WORLD_SEED);
+
+  // Player (local)
+  const me = {
+    id: 'local',
+    x: WORLD_SIZE/2, y: WORLD_SIZE/2,
+    vx:0, vy:0,
+    baseSpeed: 2.6,
+    radius: 12,
+    color: '#58a6ff',
+    hp: 100, hpMax: 100,
+    ammo: 60, ammoMax: 120,
+    fireCooldown: 0,
+    fireRate: 180,
+    damage: 12,
+    bulletSpeed: 8,
+    spread: 0.06,
+    reloadTime: 900,
+    reloading: false,
+    inCarId: null,
+    inventory: [],
+    buffs: {},
+    pvpEnabled: true,
+    lastPush: 0,
+  };
+
+  // Remote players
+  const remotePlayers = {}; // peerId -> {x,y,hp,hpMax,ammo,ammoMax,color,inCarId,angle}
+  function colorForId(id){
+    // simple hash -> hue
+    let h=0; for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i))>>>0;
+    const hue = h % 360;
+    return `hsl(${hue} 85% 62%)`;
+  }
+
+  // Entities
+  const buildings = [];
+  const cars = [];
+  const items = [];
+  const effects = [];
+  const zombies = [];
+  const bullets = []; // {x,y,vx,vy,life,alive,damage,pierce,crit,owner}
+  let kills = 0;
+  let wave = 1;
+  let lastWaveTime = 0;
+
+  // Items / effects (same as zm)
+  const ITEM_TYPES = [
+    'Scrap','Wire','Gear','Battery','DuctTape','MedPatch','FoodCan','Water','Fuel','Tire',
+    'SparkPlug','Glass','Circuit','Copper','Steel','Plastic','GunParts','KnifeParts','Cloth','Herb',
+    'Paper','Coin','Watch','Key'
+  ];
+
+  const EFFECT_TYPES = [
+    {key:'heal25', name:'Heal +25', apply:()=>{ me.hp = Math.min(me.hpMax, me.hp+25); }},
+    {key:'healFull', name:'Heal Full', apply:()=>{ me.hp = me.hpMax; }},
+    {key:'speedUp', name:'Speed +30% (30s)', dur:30, apply:()=>addBuff('speedMul',1.3,30)},
+    {key:'speedDown', name:'Speed -20% (15s)', dur:15, apply:()=>addBuff('speedMul',0.8,15)},
+    {key:'dmgUp', name:'Damage +40% (30s)', dur:30, apply:()=>addBuff('dmgMul',1.4,30)},
+    {key:'firerateUp', name:'Fire Rate +35% (25s)', dur:25, apply:()=>addBuff('fireMul',0.65,25)},
+    {key:'reloadFast', name:'Reload +50% (20s)', dur:20, apply:()=>addBuff('reloadMul',0.5,20)},
+    {key:'spreadTight', name:'Spread -40% (20s)', dur:20, apply:()=>addBuff('spreadMul',0.6,20)},
+    {key:'bulletSpeed', name:'Bullet Speed +50% (25s)', dur:25, apply:()=>addBuff('bspdMul',1.5,25)},
+    {key:'maxHP', name:'Max HP +20 (perm)', apply:()=>{ me.hpMax+=20; me.hp = Math.min(me.hpMax, me.hp+20);} },
+    {key:'shield', name:'Shield 30 (30s)', dur:30, apply:()=>addBuff('shield',30,30)},
+    {key:'lifesteal', name:'Lifesteal 8% (30s)', dur:30, apply:()=>addBuff('lifesteal',0.08,30)},
+    {key:'ammo30', name:'Ammo +30', apply:()=>{ me.ammo = Math.min(me.ammoMax, me.ammo+30); }},
+    {key:'ammoMax', name:'Ammo Max +40 (perm)', apply:()=>{ me.ammoMax+=40; me.ammo+=40; }},
+    {key:'carSpeed', name:'Car Speed +40% (60s)', dur:60, apply:()=>addBuff('carSpeedMul',1.4,60)},
+    {key:'zSlow', name:'Zombies Slow (10s)', dur:10, apply:()=>addBuff('zSlow',0.6,10)},
+    {key:'aoeBlast', name:'AOE Blast', apply:()=>aoeBlast(160,50)},
+    {key:'regen', name:'Regen 2/sec (20s)', dur:20, apply:()=>addBuff('regen',2,20)},
+    {key:'pierce', name:'Bullet Pierce 1 (30s)', dur:30, apply:()=>addBuff('pierce',1,30)},
+    {key:'crit', name:'Crit 25% x2 (25s)', dur:25, apply:()=>addBuff('crit',0.25,25)},
+  ];
+
+  function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+  function dist(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return Math.hypot(dx,dy); }
+  function angle(ax,ay,bx,by){ return Math.atan2(by-ay, bx-ax); }
+  function normalize(x,y){ const l=Math.hypot(x,y); return l<1e-6?{x:0,y:0}:{x:x/l,y:y/l}; }
+
+  function addBuff(key, value, seconds){
+    const until = performance.now() + seconds*1000;
+    me.buffs[key] = { value, until };
+    refreshBuffChips();
+  }
+  function getMul(key, def=1){
+    const b=me.buffs[key]; if(!b) return def;
+    if(b.until && performance.now()>b.until){ delete me.buffs[key]; refreshBuffChips(); return def; }
+    return b.value;
+  }
+  function getVal(key, def=0){
+    const b=me.buffs[key]; if(!b) return def;
+    if(b.until && performance.now()>b.until){ delete me.buffs[key]; refreshBuffChips(); return def; }
+    return b.value;
+  }
+
+  function genWorld(seed){
+    WORLD_SEED = seed|0;
+    RNG = mulberry32(WORLD_SEED);
+    buildings.length=0; cars.length=0; items.length=0; effects.length=0; zombies.length=0;
+    kills=0; wave=1; lastWaveTime=0;
+    // buildings
+    for(let i=0;i<BUILDING_COUNT;i++){
+      const w = 80 + RNG()*260, h = 80 + RNG()*260;
+      const x = RNG()*(WORLD_SIZE-w), y = RNG()*(WORLD_SIZE-h);
+      buildings.push({x,y,w,h, shade: 0.2 + RNG()*0.3});
+    }
+    // cars
+    for(let i=0;i<CAR_COUNT;i++){
+      const x = RNG()*WORLD_SIZE, y = RNG()*WORLD_SIZE;
+      cars.push({id:i, x, y, speedX:0, speedY:0, maxSpeed:4.2, accel:0.12, friction:0.06, width:44, height:22, color:'#9ee493' });
+    }
+    // scatter
+    function scatter(list, count, maker){
+      for(let i=0;i<count;i++){
+        const x = RNG()*WORLD_SIZE, y = RNG()*WORLD_SIZE;
+        list.push(maker(x,y));
+      }
+    }
+    scatter(items, ITEM_SCATTER, (x,y)=>({x,y, type: ITEM_TYPES[(RNG()*ITEM_TYPES.length)|0]}));
+    scatter(effects, EFFECT_SCATTER, (x,y)=>({x,y, type: EFFECT_TYPES[(RNG()*EFFECT_TYPES.length)|0]}));
+    // zombies
+    spawnZombies(ZOMBIE_BASE);
+  }
+
+  let zombieIdSeq = 1;
+  function spawnZombies(n){
+    for(let i=0;i<n;i++){
+      const ang = RNG()*Math.PI*2, r = 800 + RNG()*1200;
+      const x = me.x + Math.cos(ang)*r, y = me.y + Math.sin(ang)*r;
+      zombies.push({id: zombieIdSeq++, x,y, speed: 1.1 + RNG()*0.6, hp: 40+RNG()*20, radius: 12+RNG()*6, color:'#77dd77'});
+    }
+  }
+
+  // ========= INPUT =========
+  const keys = {};
+  window.addEventListener('keydown', e=>{
+    keys[e.key.toLowerCase()] = true;
+    if(e.key==='e'||e.key==='E'){ tryToggleCar(); }
+    if(e.key==='p'||e.key==='P'){ tryPush(); }
+  });
+  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+
+  let mouse = {x:0,y:0, worldX:me.x, worldY:me.y, down:false};
+  canvas.addEventListener('mousemove', e=>{
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left);
+    mouse.y = (e.clientY - rect.top);
+  });
+  canvas.addEventListener('mousedown', ()=>{ mouse.down=true; });
+  window.addEventListener('mouseup', ()=>{ mouse.down=false; });
+
+  // Mobile controls
+  const joyL = document.getElementById('joyL');
+  const joyThumb = document.getElementById('joyThumb');
+  const fireBtn = document.getElementById('fireBtn');
+  const pvpBtn = document.getElementById('pvpBtn');
+  let joyActive=false, joyStart=null, joyVec={x:0,y:0};
+  function joyPos(e){
+    const rect = joyL.getBoundingClientRect();
+    const t = ('changedTouches' in e)? e.changedTouches[0] : e;
+    return { x: t.clientX-rect.left, y: t.clientY-rect.top, r: rect };
+  }
+  function setThumb(px,py){ joyThumb.style.left = px+'px'; joyThumb.style.top = py+'px'; joyThumb.style.transform = 'translate(-50%,-50%)'; }
+  joyL.addEventListener('touchstart', e=>{
+    e.preventDefault(); joyActive=true; const p=joyPos(e); joyStart={x:p.x,y:p.y, r:p.r};
+    setThumb(p.x,p.y);
+  }, {passive:false});
+  joyL.addEventListener('touchmove', e=>{
+    e.preventDefault(); if(!joyActive) return; const p=joyPos(e);
+    const dx=p.x-joyStart.x, dy=p.y-joyStart.y; const len=Math.hypot(dx,dy); const max=joyStart.r.width*0.35;
+    const f = len>max? max/len:1; const fx=dx*f, fy=dy*f;
+    setThumb(joyStart.x+fx, joyStart.y+fy);
+    joyVec.x = fx/max; joyVec.y = fy/max;
+  }, {passive:false});
+  function joyEnd(){ joyActive=false; joyVec.x=0; joyVec.y=0; setThumb(joyL.clientWidth/2, joyL.clientHeight/2); }
+  joyL.addEventListener('touchend', e=>{ e.preventDefault(); joyEnd(); }, {passive:false});
+  joyL.addEventListener('touchcancel', e=>{ e.preventDefault(); joyEnd(); }, {passive:false});
+  let touchFire=false;
+  fireBtn.addEventListener('touchstart', e=>{ e.preventDefault(); touchFire=true; }, {passive:false});
+  fireBtn.addEventListener('touchend', e=>{ e.preventDefault(); touchFire=false; }, {passive:false});
+  pvpBtn.addEventListener('touchstart', e=>{ e.preventDefault(); tryPush(); }, {passive:false});
+
+  canvas.addEventListener('touchstart', e=>{
+    if(e.touches.length>0){
+      const t = e.touches[e.touches.length-1];
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = t.clientX - rect.left;
+      mouse.y = t.clientY - rect.top;
+      mouse.down = true;
+    }
+  }, {passive:false});
+  canvas.addEventListener('touchmove', e=>{
+    if(e.touches.length>0){
+      const t = e.touches[e.touches.length-1];
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = t.clientX - rect.left;
+      mouse.y = t.clientY - rect.top;
+    }
+  }, {passive:false});
+  canvas.addEventListener('touchend', ()=>{ mouse.down=false; }, {passive:true});
+
+  // ========= CORE ACTIONS =========
+  function shoot(tx,ty, mods, ownerId){
+    const ang = angle(me.x,me.y, tx,ty) + (Math.random()-0.5)*(me.spread*mods.spreadMul);
+    const spd = me.bulletSpeed * mods.bspdMul;
+    const vx = Math.cos(ang)*spd;
+    const vy = Math.sin(ang)*spd;
+    let dmg = me.damage * mods.dmgMul;
+    bullets.push({x:(ownerId===myId?me.x:tx), y:(ownerId===myId?me.y:ty), vx, vy, life:1200, alive:true, damage:dmg, pierce:mods.pierce||0, crit:mods.crit||0, owner: ownerId});
+  }
+
+  function startReload(reloadMul){
+    me.reloading = true;
+    me.reloadTimer = me.reloadTime*reloadMul;
+  }
+
+  function hitLocal(dmg){
+    // shield
+    if(me.buffs['shield']){
+      const b = me.buffs['shield'];
+      const use = Math.min(b.value, dmg);
+      b.value -= use;
+      dmg -= use;
+      if(b.value<=0) delete me.buffs['shield'];
+      refreshBuffChips();
+    }
+    if(dmg>0){
+      me.hp -= dmg;
+      if(me.hp<=0){ gameOver(); }
+    }
+  }
+
+  function aoeBlast(r, damage){
+    for(const z of zombies){
+      const d = dist(z.x,z.y, me.x, me.y);
+      if(d<r){ z.hp -= damage*(1-d/r); }
+    }
+  }
+
+  function dropRandom(x,y){
+    // 50% item / 50% effect
+    if(Math.random()<0.5){
+      items.push({x:x+(Math.random()*40-20), y:y+(Math.random()*40-20), type: ITEM_TYPES[(Math.random()*ITEM_TYPES.length)|0]});
+    } else {
+      effects.push({x:x+(Math.random()*40-20), y:y+(Math.random()*40-20), type: EFFECT_TYPES[(Math.random()*EFFECT_TYPES.length)|0]});
+    }
+  }
+
+  function pickUps(list, onPick){
+    for(let i=list.length-1;i>=0;i--){
+      const it = list[i];
+      if(dist(it.x,it.y, me.x,me.y) < 22){
+        onPick(it);
+        list.splice(i,1);
+      }
+    }
+  }
+
+  function tryToggleCar(){
+    // in/out
+    if(me.inCarId!=null){
+      me.inCarId=null;
+      return;
+    }
+    // find nearby
+    let best=null, bd=1e9;
+    for(const c of cars){
+      const d=dist(c.x,c.y, me.x,me.y);
+      if(d<50 && d<bd){ bd=d; best=c; }
+    }
+    if(best) me.inCarId=best.id;
+  }
+
+  function tryPush(){
+    const now=performance.now();
+    if(now - me.lastPush < 650) return;
+    me.lastPush = now;
+    // push nearby players (pvp melee)
+    const PUSH_R = 80;
+    const PUSH_DMG = 12;
+    for(const pid in remotePlayers){
+      const rp = remotePlayers[pid];
+      const d = dist(me.x,me.y, rp.x, rp.y);
+      if(d < PUSH_R){
+        // send hit to that player
+        const a = Math.atan2(rp.y-me.y, rp.x-me.x);
+        const kx = Math.cos(a)*120;
+        const ky = Math.sin(a)*120;
+        const c = conns.get(pid);
+        if(c) c.send({t:'pvp_hit', dmg:PUSH_DMG, kx, ky, from: myId});
+      }
+    }
+  }
+
+  // ========= NETWORK MESSAGES =========
+  function setNetPill(){
+    const n = conns.size;
+    document.getElementById('netPill').textContent = 'NET ' + (netReady?('ON · '+(n+1)+'p'):('…'));
+  }
+
+  function onNet(msg){
+    if(!msg || !msg.t) return;
+    if(msg.t==='hello'){
+      // register remote player slot
+      if(!remotePlayers[msg.from]){
+        remotePlayers[msg.from] = {x:me.x+80, y:me.y+80, hp:100, hpMax:100, ammo:60, ammoMax:120, inCarId:null, color: colorForId(msg.from), kx:0, ky:0};
+        refreshPlayerList();
+      }
+      if(isHost){
+        // if game already started send world snapshot
+        if(gameStarted){
+          const c = conns.get(msg.from);
+          c && c.send({t:'world', seed: WORLD_SEED, started:true});
+        }
+      }
+      setNetPill();
+    } else if(msg.t==='world'){
+      if(!isHost){
+        WORLD_SEED = msg.seed|0;
+        genWorld(WORLD_SEED);
+      }
+      netReady = true;
+      setNetPill();
+      tryStart();
+    } else if(msg.t==='state'){
+      const pid = msg.id;
+      if(pid===myId) return;
+      if(!remotePlayers[pid]){
+        remotePlayers[pid] = {x:msg.x, y:msg.y, hp:msg.hp, hpMax:msg.hpMax||100, ammo:msg.ammo||0, ammoMax:msg.ammoMax||120, inCarId:msg.inCarId??null, color: colorForId(pid), kx:0, ky:0};
+        refreshPlayerList();
+      } else {
+        const rp = remotePlayers[pid];
+        rp.x=msg.x; rp.y=msg.y; rp.hp=msg.hp; rp.hpMax=msg.hpMax||rp.hpMax;
+        rp.ammo=msg.ammo||rp.ammo; rp.ammoMax=msg.ammoMax||rp.ammoMax;
+        rp.inCarId = (msg.inCarId===null?null:msg.inCarId);
+      }
+
+    } else if(msg.t==='zstate'){
+      // host authoritative zombie snapshot (clients)
+      if(isHost) return;
+      if(Array.isArray(msg.zs)){
+        zombies.length = 0;
+        for(const z of msg.zs){
+          zombies.push({id:z.id, x:z.x, y:z.y, hp:z.hp, radius:z.r, color:'#77dd77', speed:0});
+        }
+      }
+      if(typeof msg.wave==='number') wave = msg.wave;
+      if(typeof msg.kills==='number') kills = msg.kills;
+    } else if(msg.t==='zhit'){
+      // client -> host: apply damage to zombie
+      if(!isHost) return;
+      const zid = msg.id|0;
+      const dmg = +msg.dmg || 0;
+      if(dmg<=0) return;
+      for(const z of zombies){
+        if(z.id===zid){
+          if(isHost){
+            z.hp -= dmg;
+          } else {
+            // request host to apply dmg for consistency
+            if(b.owner===myId){
+              broadcast({t:'zhit', id: z.id, dmg});
+            }
+          }
+          break;
+        }
+      }
+
+    } else if(msg.t==='shoot'){
+      // spawn their bullet locally (for visuals & local hit detection)
+      bullets.push({x:msg.x, y:msg.y, vx:msg.vx, vy:msg.vy, life:1200, alive:true, damage:msg.damage, pierce:msg.pierce||0, crit:msg.crit||0, owner: msg.owner});
+    } else if(msg.t==='pvp_hit'){
+      // apply hit to local player (authoritative for self)
+      hitLocal(msg.dmg||10);
+      // knockback
+      me.vx += (msg.kx||0)/60;
+      me.vy += (msg.ky||0)/60;
+    } else if(msg.t==='respawn'){
+      // remote respawn
+      const pid = msg.id;
+      if(remotePlayers[pid]){
+        remotePlayers[pid].hp = remotePlayers[pid].hpMax;
+        remotePlayers[pid].x = msg.x; remotePlayers[pid].y = msg.y;
+      }
+    }
+  }
+
+  // ========= START GAME =========
+  let gameStarted = false;
+
+  function tryStart(){
+    // Host: start when at least 1 connection open OR allow solo
+    if(!peer) return;
+    if(isHost){
+      // start immediately after peer open (solo allowed), but send world seed once a client joins
+      if(!gameStarted && myId){
+        // create seed
+        WORLD_SEED = (Math.random()*1e9)|0;
+        genWorld(WORLD_SEED);
+        netReady = true;
+        setNetPill();
+        startGame();
+        // broadcast world snapshot to connected clients
+        broadcast({t:'world', seed: WORLD_SEED, started:true});
+      } else if(gameStarted){
+        broadcast({t:'world', seed: WORLD_SEED, started:true});
+      }
+    } else {
+      // joiner: wait until receives world snapshot
+      if(!gameStarted && netReady){
+        startGame();
+      }
+    }
+  }
+
+  function startGame(){
+    if(gameStarted) return;
+    gameStarted = true;
+
+    // show
+    document.getElementById('lobby').style.display='none';
+    canvas.style.display='block';
+    document.getElementById('hud').style.display='block';
+    document.getElementById('legend').style.display='block';
+    document.getElementById('topInfo').style.display='flex';
+    document.getElementById('pList').style.display='block';
+
+    // mobile controls show when touch-only
+    document.getElementById('joyL').style.display='';
+    document.getElementById('fireBtn').style.display='';
+    document.getElementById('pvpBtn').style.display='';
+
+    me.id = myId || 'local';
+    me.color = isHost ? '#58a6ff' : '#ff4b81';
+
+    refreshBuffChips();
+    refreshInvChip();
+    refreshPlayerList();
+    setNetPill();
+
+    requestAnimationFrame(step);
+  }
+
+  // ========= HUD helpers =========
+  function refreshInvChip(){
+    document.getElementById('invChip').textContent = `INVENTORY ${me.inventory.length}`;
+  }
+  function refreshBuffChips(){
+    const b = document.getElementById('buffs');
+    b.innerHTML = '';
+    for(const k in me.buffs){
+      const v = me.buffs[k];
+      const left = v.until ? Math.max(0, (v.until - performance.now())/1000) : null;
+      const el = document.createElement('div');
+      el.className='buff';
+      el.textContent = left!=null ? `${k}:${fmt(v.value)} (${left.toFixed(0)}s)` : `${k}:${fmt(v.value)}`;
+      b.appendChild(el);
+    }
+  }
+  function fmt(v){
+    if(typeof v === 'number'){
+      if(Math.abs(v) >= 10) return (Math.round(v*10)/10);
+      return (Math.round(v*100)/100);
+    }
+    return String(v);
+  }
+
+  function refreshPlayerList(){
+    const wrap = document.getElementById('pList');
+    if(!gameStarted){ wrap.style.display='none'; return; }
+    let html = `<div class="pl"><strong>YOU</strong> · ${isHost?'HOST':'CLIENT'}<br/>HP ${Math.floor(me.hp)}/${me.hpMax} · AMMO ${Math.floor(me.ammo)}/${me.ammoMax}</div>`;
+    for(const pid in remotePlayers){
+      const rp = remotePlayers[pid];
+      html += `<div class="pl"><strong>${pid.slice(0,6)}</strong><br/>HP ${Math.floor(rp.hp)}/${rp.hpMax}</div>`;
+    }
+    wrap.innerHTML = html;
+  }
+
+  // ========= GAME LOOP =========
+  let zSyncT = 0; // zombie snapshot timer
+
+  let last = performance.now();
+  function step(now){
+    const dt = now - last; last = now;
+
+    // camera
+    const camX = me.x - canvas.width/DPR/2;
+    const camY = me.y - canvas.height/DPR/2;
+
+    // buffs
+    const speedMul = getMul('speedMul',1);
+    const dmgMul = getMul('dmgMul',1);
+    const fireMul = getMul('fireMul',1);
+    const reloadMul = getMul('reloadMul',1);
+    const spreadMul = getMul('spreadMul',1);
+    const bspdMul = getMul('bspdMul',1);
+    const regen = getVal('regen',0);
+    const lifesteal = getVal('lifesteal',0);
+    const pierce = getVal('pierce',0);
+    const crit = getVal('crit',0);
+
+    if(regen>0 && me.hp < me.hpMax){
+      me.hp = Math.min(me.hpMax, me.hp + regen*(dt/1000));
+    }
+
+    // movement input
+    let ix=0, iy=0;
+    if(keys['w']||keys['arrowup']) iy -= 1;
+    if(keys['s']||keys['arrowdown']) iy += 1;
+    if(keys['a']||keys['arrowleft']) ix -= 1;
+    if(keys['d']||keys['arrowright']) ix += 1;
+    ix += joyVec.x; iy += joyVec.y;
+
+    // drive / walk
+    if(me.inCarId!=null){
+      const car = cars.find(c=>c.id===me.inCarId);
+      const carSpeedMul = getMul('carSpeedMul',1);
+      if(car){
+        car.maxSpeed = 4.2*carSpeedMul;
+        const accel = car.accel;
+        const v = normalize(ix,iy);
+        car.speedX += v.x*accel;
+        car.speedY += v.y*accel;
+        const sp = Math.hypot(car.speedX,car.speedY);
+        if(sp>car.maxSpeed){ car.speedX*=car.maxSpeed/sp; car.speedY*=car.maxSpeed/sp; }
+        car.speedX *= (1-car.friction);
+        car.speedY *= (1-car.friction);
+        car.x += car.speedX;
+        car.y += car.speedY;
+        me.x = car.x; me.y = car.y;
+      }
+    } else {
+      const v = normalize(ix,iy);
+      const curSpd = me.baseSpeed * speedMul;
+      me.x += v.x * curSpd;
+      me.y += v.y * curSpd;
+      me.x = clamp(me.x, 0, WORLD_SIZE);
+      me.y = clamp(me.y, 0, WORLD_SIZE);
+    }
+
+    // aim world
+    mouse.worldX = camX + mouse.x;
+    mouse.worldY = camY + mouse.y;
+
+    // fire
+    if((mouse.down || touchFire) && me.fireCooldown<=0 && !me.reloading && me.ammo>0){
+      const a = angle(me.x,me.y, mouse.worldX, mouse.worldY);
+      const spd = me.bulletSpeed * bspdMul;
+      const ang = a + (Math.random()-0.5)*(me.spread*spreadMul);
+      const vx = Math.cos(ang)*spd;
+      const vy = Math.sin(ang)*spd;
+      const dmg = me.damage * dmgMul;
+      const b = {x:me.x, y:me.y, vx, vy, life:1200, alive:true, damage:dmg, pierce:(pierce||0), crit:(crit||0), owner: myId};
+      bullets.push(b);
+      // send shoot
+      if(conns.size>0){
+        broadcast({t:'shoot', x:b.x, y:b.y, vx:b.vx, vy:b.vy, damage:b.damage, pierce:b.pierce, crit:b.crit, owner: myId});
+      }
+      me.fireCooldown = me.fireRate*fireMul;
+      me.ammo--;
+      if(me.ammo<=0){ startReload(reloadMul); }
+    } else {
+      me.fireCooldown -= dt;
+    }
+
+    // reload
+    if(keys['r'] && !me.reloading && me.ammo<me.ammoMax){
+      startReload(reloadMul);
+    }
+    if(me.reloading){
+      me.reloadTimer -= dt;
+      if(me.reloadTimer<=0){
+        me.reloading=false;
+        me.ammo = Math.min(me.ammoMax, me.ammo + Math.floor(me.ammoMax*0.6));
+      }
+    }
+
+    // zombies AI (HOST authoritative: clients receive snapshots)
+    const zSlowMul = getMul('zSlow',1);
+    if(isHost){
+      for(const z of zombies){
+      const toP = angle(z.x,z.y, me.x, me.y);
+      const sp = z.speed * zSlowMul;
+      z.x += Math.cos(toP)*sp;
+      z.y += Math.sin(toP)*sp;
+
+      // collision with local player
+      if(dist(z.x,z.y, me.x, me.y) < (z.radius+me.radius)){
+        hitLocal(10 * (me.inCarId!=null?0.5:1));
+        z.x -= Math.cos(toP)*6; z.y -= Math.sin(toP)*6;
+      }
+      // collision with remote players (purely cosmetic damage avoided)
+      }
+
+      // broadcast zombie snapshots ~10fps
+      zSyncT += dt;
+      if(zSyncT > 100){
+        zSyncT = 0;
+        const zs = zombies.slice(0,220).map(z=>({id:z.id, x:z.x, y:z.y, hp:z.hp, r:z.radius}));
+        broadcast({t:'zstate', zs, wave, kills});
+      }
+    }
+
+    // bullets
+    for(const b of bullets){
+      b.x += b.vx; b.y += b.vy;
+      b.life -= dt;
+      if(b.life<=0) b.alive=false;
+      if(!b.alive) continue;
+
+      // hit zombies
+      for(const z of zombies){
+        if(!b.alive) break;
+        if(dist(b.x,b.y,z.x,z.y) < z.radius+2){
+          const isCrit = Math.random() < (b.crit||0);
+          const dmg = (b.damage * (isCrit?2:1));
+          z.hp -= dmg;
+          // lifesteal only for local owner
+          if(b.owner===myId){
+            const ls = lifesteal;
+            if(ls>0){
+              const heal = dmg*ls;
+              if(me.buffs['shield']) me.buffs['shield'].value = Math.min(me.buffs['shield'].value+heal, 60);
+              else me.hp = Math.min(me.hpMax, me.hp+heal);
+              refreshBuffChips();
+            }
+          }
+          b.pierced = (b.pierced||0)+1;
+          if((b.pierced) > (b.pierce||0)) b.alive=false;
+        }
+      }
+
+      // hit players (PVP)
+      if(me.pvpEnabled){
+        // if bullet not mine, can hit me
+        if(b.owner && b.owner!==myId){
+          if(dist(b.x,b.y, me.x, me.y) < me.radius+2){
+            hitLocal(Math.max(1, Math.floor(b.damage)));
+            b.alive=false;
+          }
+        } else if(b.owner===myId){
+          // my bullet can hit remote players
+          for(const pid in remotePlayers){
+            const rp = remotePlayers[pid];
+            if(dist(b.x,b.y, rp.x, rp.y) < 14){
+              // tell remote to take dmg (they are authoritative for themselves)
+              const c = conns.get(pid);
+              if(c) c.send({t:'pvp_hit', dmg:Math.max(1, Math.floor(b.damage)), kx: b.vx*8, ky: b.vy*8, from: myId});
+              b.alive=false;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // cleanup bullets
+    for(let i=bullets.length-1;i>=0;i--){
+      if(!bullets[i].alive) bullets.splice(i,1);
+    }
+
+    // dead zombies (HOST only for drops/kills; clients will receive snapshot updates)
+    if(isHost){
+      for(let i=zombies.length-1;i>=0;i--){
+      if(zombies[i].hp<=0){
+        if(Math.random()<0.22){ dropRandom(zombies[i].x, zombies[i].y); }
+        zombies.splice(i,1);
+        kills++;
+      }
+    }
+
+    }
+
+    // wave
+    if(now - lastWaveTime > 15000){
+      wave++; lastWaveTime = now;
+      spawnZombies(Math.floor(ZOMBIE_BASE * (0.3 + wave*0.15)));
+    }
+
+    // pickups
+    pickUps(items, (it)=>{ me.inventory.push(it.type); refreshInvChip(); });
+    pickUps(effects, (ef)=>{ ef.type.apply(); refreshBuffChips(); });
+
+    // HUD update
+    document.getElementById('hpBar').style.width = (me.hp/me.hpMax*100)+'%';
+    document.getElementById('ammoChip').textContent = (me.reloading? 'RELOADING…' : `AMMO ${Math.floor(me.ammo)}/${me.ammoMax}`);
+    document.getElementById('scoreChip').textContent = `KILLS ${kills}`;
+    document.getElementById('waveChip').textContent = `WAVE ${wave}`;
+    document.getElementById('carChip').style.display = (me.inCarId!=null)?'inline-block':'none';
+    document.getElementById('pvpChip').textContent = me.pvpEnabled? 'PvP ON':'PvP OFF';
+
+    // send state
+    if(conns.size>0){
+      broadcast({t:'state', id: myId, x:me.x, y:me.y, hp:me.hp, hpMax:me.hpMax, ammo:me.ammo, ammoMax:me.ammoMax, inCarId: me.inCarId});
+    }
+    refreshPlayerList();
+
+    // render
+    drawWorld(camX,camY);
+
+    requestAnimationFrame(step);
+  }
+
+  function drawWorld(camX,camY){
+    ctx.fillStyle = '#0e0e0e';
+    ctx.fillRect(0,0,canvas.width/DPR, canvas.height/DPR);
+
+    const tile = 64;
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    const startX = Math.floor(camX/tile)*tile - camX;
+    const startY = Math.floor(camY/tile)*tile - camY;
+    for(let x=startX; x<canvas.width/DPR; x+=tile){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height/DPR); ctx.stroke(); }
+    for(let y=startY; y<canvas.height/DPR; y+=tile){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width/DPR,y); ctx.stroke(); }
+
+    // buildings
+    for(const b of buildings){
+      const x = b.x - camX, y = b.y - camY;
+      if(x+b.w< -100 || x> canvas.width/DPR+100 || y+b.h<-100 || y>canvas.height/DPR+100) continue;
+      const shade = Math.floor(b.shade*255);
+      ctx.fillStyle = `rgba(${shade},${shade},${shade},0.35)`;
+      ctx.fillRect(x,y,b.w,b.h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.strokeRect(x,y,b.w,b.h);
+    }
+
+    // cars
+    for(const c of cars){
+      const x = c.x - camX, y = c.y - camY;
+      if(x<-80||x>canvas.width/DPR+80||y<-80||y>canvas.height/DPR+80) continue;
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-c.width/2,-c.height/2,c.width,c.height);
+      ctx.restore();
+      if(dist(c.x,c.y,me.x,me.y)<50){
+        drawHint(x,y-22,(me.inCarId==null)?'E: 탑승':'E: 하차');
+      }
+    }
+
+    // items
+    for(const it of items){
+      const x = it.x - camX, y = it.y - camY;
+      if(x<-50||x>canvas.width/DPR+50||y<-50||y>canvas.height/DPR+50) continue;
+      drawPickup(x,y,'#ffd166', it.type[0]);
+    }
+    for(const ef of effects){
+      const x = ef.x - camX, y = ef.y - camY;
+      if(x<-50||x>canvas.width/DPR+50||y<-50||y>canvas.height/DPR+50) continue;
+      drawPickup(x,y,'#80ed99','★');
+    }
+
+    // bullets
+    ctx.fillStyle='#fff';
+    for(const b of bullets){
+      const x = b.x - camX, y = b.y - camY;
+      if(x<-5||x>canvas.width/DPR+5||y<-5||y>canvas.height/DPR+5) continue;
+      ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill();
+    }
+
+    // zombies
+    for(const z of zombies){
+      const x = z.x - camX, y = z.y - camY;
+      if(x<-40||x>canvas.width/DPR+40||y<-40||y>canvas.height/DPR+40) continue;
+      ctx.fillStyle = z.color;
+      ctx.beginPath(); ctx.arc(x,y,z.radius,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#222'; ctx.fillRect(x-12,y-z.radius-10,24,4);
+      ctx.fillStyle='#f66'; ctx.fillRect(x-12,y-z.radius-10,24*(clamp(z.hp,0,60)/60),4);
+    }
+
+    // remote players
+    for(const pid in remotePlayers){
+      const rp = remotePlayers[pid];
+      const x = rp.x - camX, y = rp.y - camY;
+      if(x<-60||x>canvas.width/DPR+60||y<-60||y>canvas.height/DPR+60) continue;
+      ctx.fillStyle = rp.color;
+      ctx.beginPath(); ctx.arc(x,y,12,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.fillRect(x-22,y-26,44,10);
+      ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(pid.slice(0,6), x, y-21);
+      // hp tiny
+      ctx.fillStyle='#222'; ctx.fillRect(x-18,y-14,36,4);
+      ctx.fillStyle='#ff5577'; ctx.fillRect(x-18,y-14,36*(clamp(rp.hp,0,rp.hpMax)/rp.hpMax),4);
+    }
+
+    // me
+    const px = me.x - camX, py = me.y - camY;
+    ctx.fillStyle = me.color;
+    ctx.beginPath(); ctx.arc(px,py,me.radius,0,Math.PI*2); ctx.fill();
+
+    // aim line
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(mouse.worldX - camX, mouse.worldY - camY); ctx.stroke();
+
+    // vignette
+    const grd = ctx.createRadialGradient(canvas.width/(2*DPR),canvas.height/(2*DPR), Math.min(canvas.width,canvas.height)/(3*DPR),
+                                         canvas.width/(2*DPR),canvas.height/(2*DPR), Math.max(canvas.width,canvas.height)/(1.0*DPR));
+    grd.addColorStop(0,'rgba(0,0,0,0)');
+    grd.addColorStop(1,'rgba(0,0,0,0.35)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0,0,canvas.width/DPR,canvas.height/DPR);
+  }
+
+  function drawHint(x,y,text){
+    ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(x-40,y-16,80,22);
+    ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.strokeRect(x-40,y-16,80,22);
+    ctx.fillStyle='#fff'; ctx.font='12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(text,x,y-5);
+  }
+  function drawPickup(x,y,color,label){
+    ctx.fillStyle=color;
+    ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000'; ctx.font='10px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label, x, y);
+  }
+
+  function showDeath(){
+    const dm = document.getElementById('deathMsg');
+    dm.style.display='flex';
+    setTimeout(()=>dm.style.display='none', 1200);
+  }
+
+  function gameOver(){
+    showDeath();
+    // simple respawn
+    me.hp = me.hpMax;
+    me.x = WORLD_SIZE/2; me.y = WORLD_SIZE/2;
+    me.inCarId = null;
+    // notify
+    if(conns.size>0) broadcast({t:'respawn', id: myId, x: me.x, y: me.y});
+  }
+
+  // init net pills default
+  document.getElementById('roomPill').textContent = 'ROOM —';
+  document.getElementById('netPill').textContent = 'NET —';
+})();
+</script>
+</body>
+</html>
