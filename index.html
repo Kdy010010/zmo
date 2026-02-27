@@ -331,6 +331,8 @@
     buffs: {},
     pvpEnabled: true,
     lastPush: 0,
+    dead: false,
+    respawnAt: 0,
   };
 
   // Remote players
@@ -528,6 +530,7 @@
   }
 
   function hitLocal(dmg){
+    if(me.dead) return;
     // car defense bonus
     if(me.inCarId!=null){ dmg *= 0.6; }
     // shield
@@ -541,7 +544,11 @@
     }
     if(dmg>0){
       me.hp -= dmg;
-      if(me.hp<=0){ gameOver(); }
+      if(me.hp<=0){
+        me.hp = 0;
+        me.dead = true;
+        gameOver();
+      }
     }
   }
 
@@ -831,6 +838,29 @@
       me.hp = Math.min(me.hpMax, me.hp + regen*(dt/1000));
     }
 
+    // respawn tick (keeps host simulation running, avoids timer throttling)
+    if(me.dead && me.respawnAt && performance.now() >= me.respawnAt){
+      me.dead = false;
+      me.respawnAt = 0;
+
+      me.hp = me.hpMax;
+      me.ammo = me.ammoMax;
+      me.reloading = false;
+      me.fireCooldown = 0;
+      me.inCarId = null;
+      me.vx = 0; me.vy = 0;
+
+      // clear buffs on death
+      me.buffs = {};
+      refreshBuffChips();
+
+      // respawn near center (small random offset)
+      me.x = WORLD_SIZE/2 + (Math.random()*200-100);
+      me.y = WORLD_SIZE/2 + (Math.random()*200-100);
+
+      if(conns.size>0) broadcast({t:'respawn', id: myId, x: me.x, y: me.y});
+    }
+
     // movement input
     let ix=0, iy=0;
     if(keys['w']||keys['arrowup']) iy -= 1;
@@ -838,6 +868,7 @@
     if(keys['a']||keys['arrowleft']) ix -= 1;
     if(keys['d']||keys['arrowright']) ix += 1;
     ix += joyVec.x; iy += joyVec.y;
+    if(me.dead){ ix = 0; iy = 0; }
 
     // drive / walk
     if(me.inCarId!=null){
@@ -871,7 +902,7 @@
     mouse.worldY = camY + mouse.y;
 
     // fire
-    if((mouse.down || touchFire) && me.fireCooldown<=0 && !me.reloading && me.ammo>0){
+    if(!me.dead && (mouse.down || touchFire) && me.fireCooldown<=0 && !me.reloading && me.ammo>0){
       const a = angle(me.x,me.y, mouse.worldX, mouse.worldY);
       const spd = me.bulletSpeed * bspdMul;
       const ang = a + (Math.random()-0.5)*(me.spread*spreadMul*carSpreadMul);
@@ -907,17 +938,51 @@
     const zSlowMul = getMul('zSlow',1);
     if(isHost){
       for(const z of zombies){
-      const toP = angle(z.x,z.y, me.x, me.y);
-      const sp = z.speed * zSlowMul;
-      z.x += Math.cos(toP)*sp;
-      z.y += Math.sin(toP)*sp;
+        // target the nearest living player (host + clients)
+        let tx = me.x, ty = me.y, tr = me.radius, targetIsMe = true, targetPid = null;
+        let bestD = dist(z.x,z.y, me.x, me.y);
 
-      // collision with local player
-      if(dist(z.x,z.y, me.x, me.y) < (z.radius+me.radius)){
-        hitLocal(10 * (me.inCarId!=null?0.5:1));
-        z.x -= Math.cos(toP)*6; z.y -= Math.sin(toP)*6;
-      }
-      // collision with remote players (purely cosmetic damage avoided)
+        for(const pid in remotePlayers){
+          const rp = remotePlayers[pid];
+          if(!rp) continue;
+          // treat HP<=0 as dead (authoritative on client, but good enough for targeting)
+          if((rp.hp ?? 1) <= 0) continue;
+          const d = dist(z.x,z.y, rp.x, rp.y);
+          if(d < bestD){
+            bestD = d;
+            tx = rp.x; ty = rp.y;
+            tr = 12;
+            targetIsMe = false;
+            targetPid = pid;
+          }
+        }
+
+        const toP = angle(z.x,z.y, tx, ty);
+        const sp = z.speed * zSlowMul;
+        z.x += Math.cos(toP)*sp;
+        z.y += Math.sin(toP)*sp;
+
+        // collision with host player
+        if(dist(z.x,z.y, me.x, me.y) < (z.radius+me.radius)){
+          hitLocal(10 * (me.inCarId!=null?0.5:1));
+          z.x -= Math.cos(toP)*6; z.y -= Math.sin(toP)*6;
+        }
+
+        // collision with remote players (apply real damage by message; remote is authoritative for self)
+        for(const pid in remotePlayers){
+          const rp = remotePlayers[pid];
+          if(!rp || (rp.hp ?? 1) <= 0) continue;
+          if(dist(z.x,z.y, rp.x, rp.y) < (z.radius+12)){
+            const a = Math.atan2(rp.y - z.y, rp.x - z.x);
+            const kx = Math.cos(a)*90;
+            const ky = Math.sin(a)*90;
+            const c = conns.get(pid);
+            if(c) c.send({t:'pvp_hit', dmg:10, kx, ky, from:'zombie'});
+            // small separation so it doesn't spam every frame
+            z.x -= Math.cos(a)*4;
+            z.y -= Math.sin(a)*4;
+          }
+        }
       }
 
       // broadcast zombie snapshots ~10fps
@@ -1150,27 +1215,10 @@
   }
 
   function gameOver(){
+    // only schedule once
+    if(!me.dead) return;
     showDeath();
-
-    // delayed respawn (prevents desync & resets combat states)
-    setTimeout(()=>{
-      me.hp = me.hpMax;
-      me.ammo = me.ammoMax;
-      me.reloading = false;
-      me.fireCooldown = 0;
-      me.inCarId = null;
-      me.vx = 0; me.vy = 0;
-
-      // clear buffs on death
-      me.buffs = {};
-      refreshBuffChips();
-
-      // respawn near center (small random offset)
-      me.x = WORLD_SIZE/2 + (Math.random()*200-100);
-      me.y = WORLD_SIZE/2 + (Math.random()*200-100);
-
-      if(conns.size>0) broadcast({t:'respawn', id: myId, x: me.x, y: me.y});
-    }, 1200);
+    me.respawnAt = performance.now() + 1200;
   }
 
   // init net pills default
