@@ -58,7 +58,7 @@
   .legend { font-size:12px; opacity:.9; }
 
   /* Mobile controls */
-  #joyL, #fireBtn, #pvpBtn {
+  #joyL, #fireBtn, #pvpBtn, #carBtn {
     position:fixed; bottom:16px; z-index:20; user-select:none;
   }
   #joyL { left:16px; width:140px; height:140px; border-radius:50%; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.15); touch-action:none; }
@@ -75,7 +75,7 @@
     color:#cfefff; font-weight:900; letter-spacing:.05em;
   }
   @media (hover:hover) and (pointer:fine) {
-    #joyL, #fireBtn, #pvpBtn { display:none; } /* desktop hide */
+    #joyL, #fireBtn, #pvpBtn, #carBtn { display:none; } /* desktop hide */
   }
 
   /* Top center room info */
@@ -181,6 +181,7 @@
 <div id="joyL" style="display:none"><div id="joyThumb"></div></div>
 <div id="pvpBtn" style="display:none">PVP</div>
 <div id="fireBtn" style="display:none">FIRE</div>
+<div id="carBtn" style="display:none">CAR</div>
 
 <div id="pList"></div>
 
@@ -464,6 +465,7 @@
   const joyThumb = document.getElementById('joyThumb');
   const fireBtn = document.getElementById('fireBtn');
   const pvpBtn = document.getElementById('pvpBtn');
+  const carBtn = document.getElementById('carBtn');
   let joyActive=false, joyStart=null, joyVec={x:0,y:0};
   function joyPos(e){
     const rect = joyL.getBoundingClientRect();
@@ -489,6 +491,7 @@
   fireBtn.addEventListener('touchstart', e=>{ e.preventDefault(); touchFire=true; }, {passive:false});
   fireBtn.addEventListener('touchend', e=>{ e.preventDefault(); touchFire=false; }, {passive:false});
   pvpBtn.addEventListener('touchstart', e=>{ e.preventDefault(); tryPush(); }, {passive:false});
+  carBtn.addEventListener('touchstart', e=>{ e.preventDefault(); tryToggleCar(); }, {passive:false});
 
   canvas.addEventListener('touchstart', e=>{
     if(e.touches.length>0){
@@ -525,6 +528,8 @@
   }
 
   function hitLocal(dmg){
+    // car defense bonus
+    if(me.inCarId!=null){ dmg *= 0.6; }
     // shield
     if(me.buffs['shield']){
       const b = me.buffs['shield'];
@@ -739,6 +744,7 @@
     document.getElementById('joyL').style.display='';
     document.getElementById('fireBtn').style.display='';
     document.getElementById('pvpBtn').style.display='';
+    document.getElementById('carBtn').style.display='';
 
     me.id = myId || 'local';
     me.color = isHost ? '#58a6ff' : '#ff4b81';
@@ -809,6 +815,18 @@
     const pierce = getVal('pierce',0);
     const crit = getVal('crit',0);
 
+    // Car modifiers (when driving)
+    let carDefMul = 1;
+    let carMoveMul = 1;
+    let carDmgMul = 1;
+    let carSpreadMul = 1;
+    if(me.inCarId!=null){
+      carDefMul = 0.6;        // take 60% damage (def up)
+      carMoveMul = 1.25;      // extra movement speed
+      carDmgMul = 0.65;       // damage down
+      carSpreadMul = 1.9;     // aim/spread worse
+    }
+
     if(regen>0 && me.hp < me.hpMax){
       me.hp = Math.min(me.hpMax, me.hp + regen*(dt/1000));
     }
@@ -826,7 +844,7 @@
       const car = cars.find(c=>c.id===me.inCarId);
       const carSpeedMul = getMul('carSpeedMul',1);
       if(car){
-        car.maxSpeed = 4.2*carSpeedMul;
+        car.maxSpeed = 4.2*carSpeedMul*carMoveMul;
         const accel = car.accel;
         const v = normalize(ix,iy);
         car.speedX += v.x*accel;
@@ -841,7 +859,7 @@
       }
     } else {
       const v = normalize(ix,iy);
-      const curSpd = me.baseSpeed * speedMul;
+      const curSpd = me.baseSpeed * speedMul * carMoveMul;
       me.x += v.x * curSpd;
       me.y += v.y * curSpd;
       me.x = clamp(me.x, 0, WORLD_SIZE);
@@ -856,10 +874,10 @@
     if((mouse.down || touchFire) && me.fireCooldown<=0 && !me.reloading && me.ammo>0){
       const a = angle(me.x,me.y, mouse.worldX, mouse.worldY);
       const spd = me.bulletSpeed * bspdMul;
-      const ang = a + (Math.random()-0.5)*(me.spread*spreadMul);
+      const ang = a + (Math.random()-0.5)*(me.spread*spreadMul*carSpreadMul);
       const vx = Math.cos(ang)*spd;
       const vy = Math.sin(ang)*spd;
-      const dmg = me.damage * dmgMul;
+      const dmg = me.damage * dmgMul * carDmgMul;
       const b = {x:me.x, y:me.y, vx, vy, life:1200, alive:true, damage:dmg, pierce:(pierce||0), crit:(crit||0), owner: myId};
       bullets.push(b);
       // send shoot
@@ -1133,12 +1151,26 @@
 
   function gameOver(){
     showDeath();
-    // simple respawn
-    me.hp = me.hpMax;
-    me.x = WORLD_SIZE/2; me.y = WORLD_SIZE/2;
-    me.inCarId = null;
-    // notify
-    if(conns.size>0) broadcast({t:'respawn', id: myId, x: me.x, y: me.y});
+
+    // delayed respawn (prevents desync & resets combat states)
+    setTimeout(()=>{
+      me.hp = me.hpMax;
+      me.ammo = me.ammoMax;
+      me.reloading = false;
+      me.fireCooldown = 0;
+      me.inCarId = null;
+      me.vx = 0; me.vy = 0;
+
+      // clear buffs on death
+      me.buffs = {};
+      refreshBuffChips();
+
+      // respawn near center (small random offset)
+      me.x = WORLD_SIZE/2 + (Math.random()*200-100);
+      me.y = WORLD_SIZE/2 + (Math.random()*200-100);
+
+      if(conns.size>0) broadcast({t:'respawn', id: myId, x: me.x, y: me.y});
+    }, 1200);
   }
 
   // init net pills default
